@@ -21,6 +21,225 @@ defmodule NervesKey.Config do
                  0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x2F, 0x0F, 0x2F, 0x0F, 0x2F,
                  0x0F, 0x2F, 0x0F, 0x0F, 0x0F, 0x0F>>
 
+  def config do
+    {@key_config, @slot_config}
+  end
+
+  def unpack_config(slots) do
+    IO.inspect(byte_size(@key_config), label: "key config, bytes")
+    IO.inspect(byte_size(@slot_config), label: "slot config, bytes")
+
+    key_config =
+      @key_config
+      |> twobyte()
+
+    slot_config =
+      @slot_config
+      |> twobyte()
+
+    Enum.zip(key_config, slot_config)
+    |> Enum.with_index()
+    |> Enum.each(fn {{key, slot}, index} ->
+      if is_nil(slots) || index in slots do
+        IO.puts("\n\n--- Slot #{index} -----------------------------")
+
+        IO.puts(
+          "slot: #{inspect(slot, as: :binary, base: :hex)} :: #{inspect(slot, as: :binary, base: :binary)}"
+        )
+
+        IO.puts(
+          "key: #{inspect(key, as: :binary, base: :hex)} :: #{inspect(key, as: :binary, base: :binary)}"
+        )
+
+        IO.puts("\n")
+
+        unpack_slot(slot)
+        unpack_key(key)
+      end
+    end)
+  end
+
+  def unpack_config(transport, slots) do
+    {:ok, %{slot_config: slot_config, key_config: key_config}} = Configuration.read(transport)
+
+    key_config =
+      key_config
+      |> twobyte()
+
+    slot_config =
+      slot_config
+      |> twobyte()
+
+    Enum.zip(key_config, slot_config)
+    |> Enum.with_index()
+    |> Enum.each(fn {{key, slot}, index} ->
+      if is_nil(slots) || index in slots do
+        IO.puts("\n\n--- Slot #{index} -----------------------------")
+
+        IO.puts(
+          "slot: #{inspect(slot, as: :binary, base: :hex)} :: #{inspect(slot, as: :binary, base: :binary)}"
+        )
+
+        IO.puts(
+          "key: #{inspect(key, as: :binary, base: :hex)} :: #{inspect(key, as: :binary, base: :binary)}"
+        )
+
+        IO.puts("\n")
+
+        unpack_slot(slot)
+        unpack_key(key)
+      end
+    end)
+  end
+
+  defp twobyte(binary) do
+    case binary do
+      <<part::binary-size(2)>> ->
+        [part]
+
+      <<part::binary-size(2), rest::binary>> ->
+        [part, twobyte(rest)]
+    end
+    |> List.flatten()
+  end
+
+  @key [
+    [
+      private: 1,
+      pub_info: 1,
+      key_type: 3,
+      lockable: 1,
+      req_random: 1,
+      req_auth: 1
+    ],
+    [auth_key: 4, persistent_disable: 1, unused: 1, x509_id: 2]
+  ]
+  defp unpack_key(key) do
+    IO.puts("\nKey config:")
+    # key config, 16 bit (2 byte), 16 slots, 32 bytes from 96 to 127
+    <<
+      # Private - Contains an ECC private key otherwise may contain something else
+      private::size(1),
+      # PubInfo - Can this public key be generated?
+      pub_info::size(1),
+      # KeyType - 0-3 unused, 4 - ECC Key, 5 - unused, 6 - AES key, 7 - SHA or other data
+      key_type::size(3),
+      # Lockable - Can be individually locked by Lock command
+      lockable::size(1),
+      # ReqRandom - Require a random Nonce for various commands
+      req_random::size(1),
+      # ReqAuth - Require authentication using AuthKey to make this key usable
+      req_auth::size(1),
+      # AuthKey - KeyID of key used to authenticate this key
+      auth_key::size(4),
+      # PersistentDisable - Key is only usable if persistent latch is set.
+      persistent_disable::size(1),
+      # Unused
+      _unused::size(1),
+      # X509id - id of x509format array in configuration zone corresponding to this slot
+      x509_id::size(2)
+    >> = key
+
+    bindings = binding()
+
+    max_k = bindings |> Enum.map(&String.length(to_string(elem(&1, 0)))) |> Enum.max()
+    max_v = bindings |> Enum.map(&String.length(to_string(elem(&1, 1)))) |> Enum.max()
+
+    key
+    |> format(@key)
+    |> Enum.map(fn {k, v, s, o} ->
+      binary =
+        v
+        |> b2()
+        |> String.pad_leading(s, ["0"])
+        |> String.pad_leading(16 - o)
+
+      "#{String.pad_trailing(to_string(k), max_k, ["."])}..#{String.pad_leading(to_string(v), max_v, ["."])} :: #{binary}"
+    end)
+    |> Enum.join("\n")
+    |> IO.puts()
+  end
+
+  defp format(binary, [format1, format2]) do
+    <<byte1::binary-size(1), byte2::binary-size(1)>> = binary
+
+    [format(byte1, format1, 0, 0), format(byte2, format2, 0, 8)]
+    |> List.flatten()
+  end
+
+  defp format(binary, format, offset, base_offset) do
+    case format do
+      [] ->
+        []
+
+      [{name, bits} | format] ->
+        # IO.inspect(binary, label: "bin", as: :binary, base: :binary)
+        rem = 8 - (offset + bits)
+        <<_skip::size(rem), part::size(bits), _::size(offset)>> = binary
+        # IO.inspect({offset, bits, rem}, label: "slice")
+        # IO.inspect(part, label: "got", as: :binary, base: :binary)
+        [
+          {name, part, bits, offset + base_offset},
+          format(binary, format, offset + bits, base_offset)
+        ]
+    end
+  end
+
+  @slot [
+    [
+      read_key: 4,
+      no_mac: 1,
+      limited_use: 1,
+      encrypt_read: 1,
+      is_secret: 1
+    ],
+    [write_key: 4, write_config: 4]
+  ]
+  defp unpack_slot(slot) do
+    IO.puts("\nSlot config:")
+    # slot config, 16 bit (2 byte), 16 slots, 32 bytes from 20 to 51
+    <<
+      # read_key, 4 bits
+      # different meaning if private key
+      # for non-private: KeyID for key to use to encrypt data being Read from this slot
+      read_key::size(4),
+      # NoMac - Disallow using slot for MAC command
+      no_mac::size(1),
+      # LimitedUse - Limited usages based on counter0
+      limited_use::size(1),
+      # EncryptRead
+      encrypt_read::size(1),
+      # IsSecret - Should it contain keys? Should it be protected? If so: 1
+      is_secret::size(1),
+      # WriteKey - KeyID for which key is used to validate writes to this slot
+      write_key::size(4),
+      # WriteConfig - Control details of how
+      write_config::size(4)
+    >> = slot
+
+    bindings = binding()
+
+    max_k = bindings |> Enum.map(&String.length(to_string(elem(&1, 0)))) |> Enum.max()
+    max_v = bindings |> Enum.map(&String.length(to_string(elem(&1, 1)))) |> Enum.max()
+
+    slot
+    |> format(@slot)
+    |> Enum.map(fn {k, v, s, o} ->
+      binary =
+        v
+        |> b2()
+        |> String.pad_leading(s, ["0"])
+        |> String.pad_leading(16 - o)
+
+      "#{String.pad_trailing(to_string(k), max_k, ["."])}..#{String.pad_leading(to_string(v), max_v, ["."])} :: #{binary}"
+
+      # "#{String.pad_trailing(to_string(k), max_k, ["."])}..#{String.pad_leading(to_string(v), max_v, ["."])} :: #{inspect(v, base: :binary)}"
+      # "#{String.pad_trailing(to_string(k), max_k, ["."])}..#{String.pad_leading(to_string(v), max_v, ["."])} :: #{bin(v)}"
+    end)
+    |> Enum.join("\n")
+    |> IO.puts()
+  end
+
   @doc """
   Configure an ATECC508A or ATECC608A as a NervesKey.
 
@@ -105,4 +324,12 @@ defmodule NervesKey.Config do
        do: true
 
   defp key_config_compatible(_), do: false
+
+  defp bin(val) do
+    :io_lib.format("~8.02B", [val]) |> to_string() |> String.replace(" ", "0")
+  end
+
+  defp b2(val) do
+    :io_lib.format("~.02B", [val]) |> to_string()
+  end
 end
