@@ -371,6 +371,103 @@ defmodule NervesKey do
   end
 
   @doc """
+  Provision a NervesKey in one step.
+
+  See the README.md for how to use this. This function locks the
+  ATECC508A down, so you'll want to be sure what you pass it is
+  correct.
+
+  This function does it all. It requires the signer's private key so
+  handle that with care. Alternatively, please consider sending a PR
+  for supporting off-device signatures so that HSMs can be used.
+  """
+  @spec volatile_provision(
+          ATECC508A.Transport.t(),
+          ProvisioningInfo.t(),
+          X509.Certificate.t(),
+          X509.PrivateKey.t(),
+          binary()
+        ) :: :ok
+  def volatile_provision(transport, info, signer_cert, signer_key, <<_::128>> = aes_key) do
+    check_time()
+
+    # :ok = volatile_configure(transport)
+    otp_info = OTP.new(info.board_name, info.manufacturer_sn)
+    otp_data = OTP.to_raw(otp_info)
+    :ok = {:write, OTP.write(transport, otp_data)}
+
+    {:ok, device_public_key} = Data.genkey(transport)
+    {:ok, device_sn} = Config.device_sn(transport)
+
+    device_cert =
+      ATECC508A.Certificate.new_device(
+        device_public_key,
+        device_sn,
+        info.manufacturer_sn,
+        signer_cert,
+        signer_key
+      )
+
+    slot_data = Data.volatile_slot_data(device_sn, device_cert, signer_cert, aes_key)
+
+    :ok = Data.write_slots(transport, slot_data)
+
+    # This is the point of no return!!
+
+    # Lock the data and OTP zones
+    :ok = Data.lock(transport, otp_data, slot_data)
+
+    # Lock the slot that contains the private key to prevent calls to GenKey
+    # from changing it. See datasheet for how GenKey doesn't check the zone
+    # lock.
+    # :ok = ATECC508A.Request.lock_slot(transport, 0)
+    # :ok = ATECC508A.Request.lock_slot(transport, 1)
+  end
+
+  @doc """
+  Test a provision of a NervesKey.
+
+  See the README.md for how to use this. This function locks the
+  ATECC508A down, so you'll want to be sure what you pass it is
+  correct.
+
+  This function does it all. It requires the signer's private key so
+  handle that with care. Alternatively, please consider sending a PR
+  for supporting off-device signatures so that HSMs can be used.
+  """
+  @spec test_provision(
+          ATECC508A.Transport.t(),
+          ProvisioningInfo.t(),
+          X509.Certificate.t(),
+          X509.PrivateKey.t()
+        ) :: :ok
+  def test_provision(transport, info, signer_cert, signer_key) do
+    check_time()
+
+    # Configure does lock the config
+    # :ok = configure(transport)
+    otp_info = OTP.new(info.board_name, info.manufacturer_sn)
+    otp_data = OTP.to_raw(otp_info)
+    :ok = OTP.write(transport, otp_data)
+
+    {:ok, device_public_key} = Data.genkey(transport)
+    {:ok, device_sn} = Config.device_sn(transport)
+
+    device_cert =
+      ATECC508A.Certificate.new_device(
+        device_public_key,
+        device_sn,
+        info.manufacturer_sn,
+        signer_cert,
+        signer_key
+      )
+
+    slot_data = Data.slot_data(device_sn, device_cert, signer_cert)
+
+    :ok = Data.write_slots(transport, slot_data)
+  end
+
+  @doc """
   Provision the auxiliary device/signer certificates on a NervesKey.
 
   This function creates and saves the auxiliary certificates. These
@@ -571,6 +668,14 @@ defmodule NervesKey do
       Config.config_compatible?(transport) == {:ok, true} -> :ok
       Config.configured?(transport) == {:ok, true} -> {:error, :config_locked}
       true -> Config.configure(transport)
+    end
+  end
+
+  defp volatile_configure(transport) do
+    cond do
+      #      Config.volatile_config_compatible?(transport) == {:ok, true} -> :ok
+      Config.configured?(transport) == {:ok, true} -> {:error, :config_locked}
+      true -> Config.configure_volatile(transport)
     end
   end
 

@@ -21,6 +21,75 @@ defmodule NervesKey.Config do
                  0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x2F, 0x0F, 0x2F, 0x0F, 0x2F,
                  0x0F, 0x2F, 0x0F, 0x0F, 0x0F, 0x0F>>
 
+  @key [
+    [
+      private: 1,
+      pub_info: 1,
+      key_type: 3,
+      lockable: 1,
+      req_random: 1,
+      req_auth: 1
+    ],
+    [auth_key: 4, persistent_disable: 1, unused: 1, x509_id: 2]
+  ]
+
+  @slot [
+    [
+      read_key: 4,
+      no_mac: 1,
+      limited_use: 1,
+      encrypt_read: 1,
+      is_secret: 1
+    ],
+    [write_key: 4, write_config: 4]
+  ]
+
+  def set_volatile_key(
+        %ATECC508A.Configuration{
+          last_key_use: lku,
+          key_config: key_config,
+          slot_config: slot_config
+        } = info,
+        key_id
+      ) do
+    <<use_lock::1-bytes, _::1-bytes, rest::binary>> = lku
+
+    lku = <<use_lock::1-bytes, key_id::3, 0::4, 1::1, rest::binary>>
+
+    key_config =
+      key_config
+      # Don't disable they key we rely on, would be bad
+      |> set_key_config(key_id, :persistent_disable, 0)
+      # Set ReqRandom on the volatile key
+      |> set_key_config(key_id, :req_random, 1)
+      # Set ReqAuth to not require auth on the volatile key
+      |> set_key_config(key_id, :req_auth, 0)
+      |> set_key_config(key_id, :auth_key, 0)
+      # Set KeyType to be AES
+      |> set_key_config(key_id, :key_type, 6)
+      # Allow locking the slot
+      |> set_key_config(key_id, :lockable, 1)
+
+    slot_config =
+      slot_config
+      # Disable CheckMac Copy operation
+      |> set_slot_config(key_id, :read_key, 1)
+      # Shouldn't be usable with the MAC command
+      |> set_slot_config(key_id, :no_mac, 1)
+      # Ensure no use limit
+      |> set_slot_config(key_id, :limited_use, 0)
+      # Not requiring encrypted read because reads will not be allowed
+      |> set_slot_config(key_id, :encrypt_read, 0)
+      # Is secret
+      |> set_slot_config(key_id, :is_secret, 1)
+      # Disable WriteKey
+      |> set_slot_config(key_id, :write_key, 0)
+      # Never allow changing the key
+      |> set_slot_config(key_id, :write_config, 0b1001)
+
+    %{info | last_key_use: lku, key_config: key_config, slot_config: slot_config}
+  end
+
   def config do
     {@key_config, @slot_config}
   end
@@ -103,17 +172,6 @@ defmodule NervesKey.Config do
     |> List.flatten()
   end
 
-  @key [
-    [
-      private: 1,
-      pub_info: 1,
-      key_type: 3,
-      lockable: 1,
-      req_random: 1,
-      req_auth: 1
-    ],
-    [auth_key: 4, persistent_disable: 1, unused: 1, x509_id: 2]
-  ]
   defp unpack_key(key) do
     IO.puts("\nKey config:")
     # key config, 16 bit (2 byte), 16 slots, 32 bytes from 96 to 127
@@ -160,6 +218,59 @@ defmodule NervesKey.Config do
     |> IO.puts()
   end
 
+  defp get_key_bit_offset(sizes, key) do
+    sizes
+    |> Enum.reduce_while(0, fn {k, size}, offset ->
+      if key == k do
+        {:halt, {offset, size}}
+      else
+        {:cont, offset + size}
+      end
+    end)
+  end
+
+  defp get_key_offsets(format, key) do
+    format
+    |> Enum.with_index()
+    |> Enum.reduce_while(0, fn {keys, index}, _ ->
+      if Keyword.has_key?(keys, key) do
+        {:halt, {index, get_key_bit_offset(keys, key)}}
+      else
+        {:cont, 0}
+      end
+    end)
+  end
+
+  def set_key_config(key_config, slot_id, key, value) do
+    set_key_in_config(key_config, @key, slot_id, key, value)
+  end
+
+  def set_slot_config(slot_config, slot_id, key, value) do
+    set_key_in_config(slot_config, @slot, slot_id, key, value)
+  end
+
+  defp set_key_in_config(key_config, format, slot_id, key, value) do
+    slot_offset = slot_id * 16
+    slot_rem = 16 * 16 - (slot_offset + 16)
+    <<pre_slot::size(slot_offset), slot::2-bytes, post_slot::size(slot_rem)>> = key_config
+
+    {byte_offset, {bit_offset, bit_size}} = get_key_offsets(format, key)
+    byte_rem = 1 - byte_offset
+
+    <<pre_byte::binary-size(byte_offset), byte::binary-size(1), post_byte::binary-size(byte_rem)>> =
+      slot
+
+    bit_rem = 8 - (bit_offset + bit_size)
+    <<post_bits::size(bit_rem), old_value::size(bit_size), pre_bits::size(bit_offset)>> = byte
+
+    <<pre_slot::size(slot_offset), pre_byte::binary-size(byte_offset), post_bits::size(bit_rem),
+      value::size(bit_size), pre_bits::size(bit_offset), post_byte::binary-size(byte_rem),
+      post_slot::size(slot_rem)>>
+    |> tap(fn new ->
+      <<_::size(slot_offset), slot::2-bytes, _::binary>> = new
+    end)
+  end
+
   defp format(binary, [format1, format2]) do
     <<byte1::binary-size(1), byte2::binary-size(1)>> = binary
 
@@ -185,16 +296,6 @@ defmodule NervesKey.Config do
     end
   end
 
-  @slot [
-    [
-      read_key: 4,
-      no_mac: 1,
-      limited_use: 1,
-      encrypt_read: 1,
-      is_secret: 1
-    ],
-    [write_key: 4, write_config: 4]
-  ]
   defp unpack_slot(slot) do
     IO.puts("\nSlot config:")
     # slot config, 16 bit (2 byte), 16 slots, 32 bytes from 20 to 51
@@ -246,7 +347,7 @@ defmodule NervesKey.Config do
   This can only be called once. Subsequent calls will fail.
   """
   @spec configure(ATECC508A.Transport.t()) :: {:error, atom()} | :ok
-  def configure(transport) do
+  def configure(transport, lock? \\ true) do
     with {:ok, info} <- Configuration.read(transport),
          provision_info = %Configuration{
            info
@@ -257,7 +358,38 @@ defmodule NervesKey.Config do
              x509_format: <<0, 0, 0, 0>>
          },
          :ok <- Configuration.write(transport, provision_info) do
-      Configuration.lock(transport, provision_info)
+      if lock? do
+        Configuration.lock(transport, provision_info)
+      else
+        :ok
+      end
+    end
+  end
+
+  @doc """
+  Configure an ATECC508A or ATECC608A as a NervesKey with a volatile setup.
+
+  This can only be called once. Subsequent calls will fail.
+  """
+  @spec configure_volatile(ATECC508A.Transport.t()) :: {:error, atom()} | :ok
+  def configure_volatile(transport, lock? \\ true) do
+    with {:ok, info} <- Configuration.read(transport),
+         provision_info =
+           %Configuration{
+             info
+             | key_config: @key_config,
+               slot_config: @slot_config,
+               otp_mode: 0xAA,
+               chip_mode: 0,
+               x509_format: <<0, 0, 0, 0>>
+           }
+           |> set_volatile_key(1),
+         :ok <- Configuration.write(transport, provision_info) do
+      if lock? do
+        Configuration.lock(transport, provision_info)
+      else
+        :ok
+      end
     end
   end
 
@@ -289,6 +421,7 @@ defmodule NervesKey.Config do
   @spec configured?(ATECC508A.Transport.t()) :: {:error, atom()} | {:ok, boolean()}
   def configured?(transport) do
     with {:ok, info} <- Configuration.read(transport) do
+      IO.inspect(info)
       {:ok, info.lock_config == 0}
     end
   end
@@ -306,6 +439,17 @@ defmodule NervesKey.Config do
 
       {:ok, answer}
     end
+  end
+
+  def volatile_config_compatible?(transport) do
+    {:ok, true}
+    # with {:ok, info} <- Configuration.read(transport) do
+    #   answer =
+    #     info.lock_config == 0 && info.chip_mode == 0 && slot_config_compatible(info.slot_config) &&
+    #       key_config_compatible(info.key_config)
+
+    #   {:ok, answer}
+    # end
   end
 
   # See the README.md for an easier-to-view version of what bytes matter
