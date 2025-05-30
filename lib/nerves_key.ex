@@ -391,10 +391,10 @@ defmodule NervesKey do
   def volatile_provision(transport, info, signer_cert, signer_key, <<_::128>> = aes_key) do
     check_time()
 
-    # :ok = volatile_configure(transport)
+    :ok = volatile_configure(transport)
     otp_info = OTP.new(info.board_name, info.manufacturer_sn)
     otp_data = OTP.to_raw(otp_info)
-    :ok = {:write, OTP.write(transport, otp_data)}
+    :ok = OTP.write(transport, otp_data)
 
     {:ok, device_public_key} = Data.genkey(transport)
     {:ok, device_sn} = Config.device_sn(transport)
@@ -673,8 +673,8 @@ defmodule NervesKey do
 
   defp volatile_configure(transport) do
     cond do
-      #      Config.volatile_config_compatible?(transport) == {:ok, true} -> :ok
-      Config.configured?(transport) == {:ok, true} -> {:error, :config_locked}
+      Config.volatile_config_compatible?(transport) == {:ok, true} -> :ok
+      # Config.configured?(transport) == {:ok, true} -> {:error, :config_locked}
       true -> Config.configure_volatile(transport)
     end
   end

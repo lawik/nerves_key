@@ -54,7 +54,8 @@ defmodule NervesKey.Config do
       ) do
     <<use_lock::1-bytes, _::1-bytes, rest::binary>> = lku
 
-    lku = <<use_lock::1-bytes, key_id::3, 0::4, 1::1, rest::binary>>
+    # lku = <<use_lock::1-bytes, key_id::3, 0::4, 1::1, rest::binary>>
+    lku = <<use_lock::1-bytes, 1::1, 0::4, key_id::3, rest::binary>>
 
     key_config =
       key_config
@@ -88,6 +89,19 @@ defmodule NervesKey.Config do
       |> set_slot_config(key_id, :write_config, 0b1001)
 
     %{info | last_key_use: lku, key_config: key_config, slot_config: slot_config}
+  end
+
+  def set_persistent_disable(
+        %ATECC508A.Configuration{
+          key_config: key_config
+        } = info,
+        key_id
+      ) do
+    key_config =
+      key_config
+      |> set_key_config(key_id, :persistent_disable, 1)
+
+    %{info | key_config: key_config}
   end
 
   def config do
@@ -383,7 +397,8 @@ defmodule NervesKey.Config do
                chip_mode: 0,
                x509_format: <<0, 0, 0, 0>>
            }
-           |> set_volatile_key(1),
+           |> set_volatile_key(1)
+           |> set_persistent_disable(0),
          :ok <- Configuration.write(transport, provision_info) do
       if lock? do
         Configuration.lock(transport, provision_info)
