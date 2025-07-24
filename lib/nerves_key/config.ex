@@ -45,17 +45,13 @@ defmodule NervesKey.Config do
   ]
 
   def set_volatile_key(
-        %ATECC508A.Configuration{
-          last_key_use: lku,
+        %ATECC508A.Configuration.Config608{
           key_config: key_config,
           slot_config: slot_config
         } = info,
         key_id
       ) do
-    <<use_lock::1-bytes, _::1-bytes, rest::binary>> = lku
-
-    # lku = <<use_lock::1-bytes, key_id::3, 0::4, 1::1, rest::binary>>
-    lku = <<use_lock::1-bytes, 1::1, 0::4, key_id::3, rest::binary>>
+    volatile = %{enabled?: true, key: key_id}
 
     key_config =
       key_config
@@ -88,7 +84,7 @@ defmodule NervesKey.Config do
       # Never allow changing the key
       |> set_slot_config(key_id, :write_config, 0b1001)
 
-    %{info | last_key_use: lku, key_config: key_config, slot_config: slot_config}
+    %{info | key_config: key_config, slot_config: slot_config, volatile_key_permission: volatile}
   end
 
   def set_persistent_disable(
@@ -436,7 +432,6 @@ defmodule NervesKey.Config do
   @spec configured?(ATECC508A.Transport.t()) :: {:error, atom()} | {:ok, boolean()}
   def configured?(transport) do
     with {:ok, info} <- Configuration.read(transport) do
-      IO.inspect(info)
       {:ok, info.lock_config == 0}
     end
   end
@@ -457,14 +452,16 @@ defmodule NervesKey.Config do
   end
 
   def volatile_config_compatible?(transport) do
-    {:ok, true}
-    # with {:ok, info} <- Configuration.read(transport) do
-    #   answer =
-    #     info.lock_config == 0 && info.chip_mode == 0 && slot_config_compatible(info.slot_config) &&
-    #       key_config_compatible(info.key_config)
+    with {:ok, %Configuration.Config608{} = info} <- Configuration.read(transport, :atecc608) do
+      answer =
+        IO.inspect(info.lock_config == 0, label: "lock_config") and
+          IO.inspect(info.chip_mode == 0, label: "chip_mode") and
+          IO.inspect(info.slot_config, label: "slot_config") and
+          IO.inspect(key_config_volatile(info.key_config), label: "key_config") and
+          IO.inspect(info.volatile_key_permission.enabled?, label: "volatile_key_permission")
 
-    #   {:ok, answer}
-    # end
+      {:ok, answer}
+    end
   end
 
   # See the README.md for an easier-to-view version of what bytes matter
@@ -476,9 +473,27 @@ defmodule NervesKey.Config do
 
   defp slot_config_compatible(_), do: false
 
+  defp slot_config_volatile(
+         <<0x87, 0x20, 0x91, 0x90, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, 0x0F, 0x2F,
+           0x0F, 0x2F, 0x0F, 0x2F, 0x0F, 0x2F, _, _, _, _>>
+       ),
+       do: true
+
+  defp slot_config_volatile(_), do: false
+
+  defp slot_config_compatible(_), do: false
+
   defp key_config_compatible(
          <<0x33, 0x00, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, 0x3C, 0x00, 0x30,
            0x00, 0x3C, 0x00, 0x3C, 0x00, _, _, _, _>>
+       ),
+       do: true
+
+  defp key_config_compatible(_), do: false
+
+  defp key_config_volatile(
+         <<0x33, 0x10, 0x78, 0x0, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, 0x3C, 0x00,
+           0x30, 0x00, 0x3C, 0x00, 0x3C, 0x00, _, _, _, _>>
        ),
        do: true
 

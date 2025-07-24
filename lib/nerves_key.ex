@@ -674,7 +674,7 @@ defmodule NervesKey do
   defp volatile_configure(transport) do
     cond do
       Config.volatile_config_compatible?(transport) == {:ok, true} -> :ok
-      # Config.configured?(transport) == {:ok, true} -> {:error, :config_locked}
+      Config.configured?(transport) == {:ok, true} -> {:error, :config_locked}
       true -> Config.configure_volatile(transport)
     end
   end
