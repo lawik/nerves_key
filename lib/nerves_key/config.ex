@@ -45,7 +45,7 @@ defmodule NervesKey.Config do
   ]
 
   def set_volatile_key(
-        %ATECC508A.Configuration.Config608{
+        %Configuration.Config608{
           key_config: key_config,
           slot_config: slot_config
         } = info,
@@ -88,7 +88,7 @@ defmodule NervesKey.Config do
   end
 
   def set_persistent_disable(
-        %ATECC508A.Configuration{
+        %ATECC508A.Configuration.Config608{
           key_config: key_config
         } = info,
         key_id
@@ -271,14 +271,11 @@ defmodule NervesKey.Config do
       slot
 
     bit_rem = 8 - (bit_offset + bit_size)
-    <<post_bits::size(bit_rem), old_value::size(bit_size), pre_bits::size(bit_offset)>> = byte
+    <<post_bits::size(bit_rem), _old_value::size(bit_size), pre_bits::size(bit_offset)>> = byte
 
     <<pre_slot::size(slot_offset), pre_byte::binary-size(byte_offset), post_bits::size(bit_rem),
       value::size(bit_size), pre_bits::size(bit_offset), post_byte::binary-size(byte_rem),
       post_slot::size(slot_rem)>>
-    |> tap(fn new ->
-      <<_::size(slot_offset), slot::2-bytes, _::binary>> = new
-    end)
   end
 
   defp format(binary, [format1, format2]) do
@@ -383,13 +380,13 @@ defmodule NervesKey.Config do
   """
   @spec configure_volatile(ATECC508A.Transport.t()) :: {:error, atom()} | :ok
   def configure_volatile(transport, lock? \\ true) do
-    with {:ok, info} <- Configuration.read(transport),
+    with {:ok, info} <- Configuration.read(transport, :atecc608),
          provision_info =
-           %Configuration{
+           %Configuration.Config608{
              info
              | key_config: @key_config,
                slot_config: @slot_config,
-               otp_mode: 0xAA,
+               count_match: 0xAA,
                chip_mode: 0,
                x509_format: <<0, 0, 0, 0>>
            }
@@ -453,10 +450,12 @@ defmodule NervesKey.Config do
 
   def volatile_config_compatible?(transport) do
     with {:ok, %Configuration.Config608{} = info} <- Configuration.read(transport, :atecc608) do
+      IO.inspect(info)
+
       answer =
         IO.inspect(info.lock_config == 0, label: "lock_config") and
           IO.inspect(info.chip_mode == 0, label: "chip_mode") and
-          IO.inspect(info.slot_config, label: "slot_config") and
+          IO.inspect(slot_config_volatile(info.slot_config), label: "slot_config") and
           IO.inspect(key_config_volatile(info.key_config), label: "key_config") and
           IO.inspect(info.volatile_key_permission.enabled?, label: "volatile_key_permission")
 
@@ -479,9 +478,11 @@ defmodule NervesKey.Config do
        ),
        do: true
 
-  defp slot_config_volatile(_), do: false
+  defp slot_config_volatile(bin) do
+    IO.inspect(bin)
 
-  defp slot_config_compatible(_), do: false
+    false
+  end
 
   defp key_config_compatible(
          <<0x33, 0x00, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, 0x3C, 0x00, 0x30,
@@ -497,7 +498,7 @@ defmodule NervesKey.Config do
        ),
        do: true
 
-  defp key_config_compatible(_), do: false
+  defp key_config_volatile(_), do: false
 
   defp bin(val) do
     :io_lib.format("~8.02B", [val]) |> to_string() |> String.replace(" ", "0")
