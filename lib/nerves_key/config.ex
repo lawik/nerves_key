@@ -71,8 +71,8 @@ defmodule NervesKey.Config do
       slot_config
       # Disable CheckMac Copy operation
       |> set_slot_config(key_id, :read_key, 1)
-      # Shouldn't be usable with the MAC command
-      |> set_slot_config(key_id, :no_mac, 1)
+      # Should be usable with the MAC command
+      |> set_slot_config(key_id, :no_mac, 0)
       # Ensure no use limit
       |> set_slot_config(key_id, :limited_use, 0)
       # Not requiring encrypted read because reads will not be allowed
@@ -85,6 +85,47 @@ defmodule NervesKey.Config do
       |> set_slot_config(key_id, :write_config, 0b1001)
 
     %{info | key_config: key_config, slot_config: slot_config, volatile_key_permission: volatile}
+  end
+
+  def set_encryption_key(
+        %Configuration.Config608{
+          key_config: key_config,
+          slot_config: slot_config
+        } = info,
+        key_id
+      ) do
+    key_config =
+      key_config
+      # Disable if persistent latch not set
+      |> set_key_config(key_id, :persistent_disable, 1)
+      # Don't require random
+      |> set_key_config(key_id, :req_random, 0)
+      # Don't require auth
+      |> set_key_config(key_id, :req_auth, 0)
+      |> set_key_config(key_id, :auth_key, 0)
+      # Set KeyType to be AES
+      |> set_key_config(key_id, :key_type, 6)
+      # Allow locking the slot
+      |> set_key_config(key_id, :lockable, 1)
+
+    slot_config =
+      slot_config
+      # Disable CheckMac Copy operation
+      |> set_slot_config(key_id, :read_key, 1)
+      # Should be usable with the MAC command
+      |> set_slot_config(key_id, :no_mac, 0)
+      # Ensure no use limit
+      |> set_slot_config(key_id, :limited_use, 0)
+      # Not requiring encrypted read because reads will not be allowed
+      |> set_slot_config(key_id, :encrypt_read, 0)
+      # Is secret
+      |> set_slot_config(key_id, :is_secret, 1)
+      # Disable WriteKey
+      |> set_slot_config(key_id, :write_key, 0)
+      # Never allow changing the key
+      |> set_slot_config(key_id, :write_config, 0b1001)
+
+    %{info | key_config: key_config, slot_config: slot_config}
   end
 
   def set_persistent_disable(
@@ -390,8 +431,15 @@ defmodule NervesKey.Config do
                chip_mode: 0,
                x509_format: <<0, 0, 0, 0>>
            }
+           # Require activation key to set auth the volatile key config
+           # and enable setting the persistent latch
            |> set_volatile_key(1)
-           |> set_persistent_disable(0),
+           # configure encryption key slot
+           |> set_encryption_key(2)
+           # Disable device private key unless latch set
+           |> set_persistent_disable(0)
+           # Disable encryption key unless latch set
+           |> set_persistent_disable(2),
          :ok <- Configuration.write(transport, provision_info) do
       if lock? do
         Configuration.lock(transport, provision_info)

@@ -386,9 +386,17 @@ defmodule NervesKey do
           ProvisioningInfo.t(),
           X509.Certificate.t(),
           X509.PrivateKey.t(),
+          binary(),
           binary()
         ) :: :ok
-  def volatile_provision(transport, info, signer_cert, signer_key, <<_::128>> = aes_key) do
+  def volatile_provision(
+        transport,
+        info,
+        signer_cert,
+        signer_key,
+        <<_::128>> = activation_key,
+        <<_::128>> = encryption_key
+      ) do
     check_time()
 
     :ok = volatile_configure(transport)
@@ -408,7 +416,8 @@ defmodule NervesKey do
         signer_key
       )
 
-    slot_data = Data.volatile_slot_data(device_sn, device_cert, signer_cert, aes_key)
+    slot_data =
+      Data.volatile_slot_data(device_sn, device_cert, signer_cert, activation_key, encryption_key)
 
     :ok = Data.write_slots(transport, slot_data)
 
@@ -420,8 +429,9 @@ defmodule NervesKey do
     # Lock the slot that contains the private key to prevent calls to GenKey
     # from changing it. See datasheet for how GenKey doesn't check the zone
     # lock.
-    # :ok = ATECC508A.Request.lock_slot(transport, 0)
-    # :ok = ATECC508A.Request.lock_slot(transport, 1)
+    :ok = ATECC508A.Request.lock_slot(transport, 0)
+    :ok = ATECC508A.Request.lock_slot(transport, 1)
+    :ok = ATECC508A.Request.lock_slot(transport, 2)
   end
 
   @doc """

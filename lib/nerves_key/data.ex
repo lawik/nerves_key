@@ -80,12 +80,19 @@ defmodule NervesKey.Data do
           ATECC508A.serial_number(),
           X509.Certificate.t(),
           X509.Certificate.t(),
+          binary(),
           binary()
         ) ::
           [
             {ATECC508A.Request.slot(), binary()}
           ]
-  def volatile_slot_data(device_sn, device_cert, signer_cert, <<_::128>> = aes_key) do
+  def volatile_slot_data(
+        device_sn,
+        device_cert,
+        signer_cert,
+        <<_::128>> = activation_key,
+        <<_::128>> = encryption_key
+      ) do
     signer_template =
       signer_cert
       |> X509.Certificate.public_key()
@@ -102,8 +109,8 @@ defmodule NervesKey.Data do
     # to lock the device so specify nothing so they'll get padded with zeros to the
     # appropriate size.
     [
-      {1, aes_key},
-      {2, <<>>},
+      {1, activation_key},
+      {2, encryption_key},
       {3, <<>>},
       {4, <<>>},
       {5, <<>>},
@@ -118,7 +125,9 @@ defmodule NervesKey.Data do
       {14, <<>>},
       {15, <<>>}
     ]
+    |> IO.inspect(label: "pre-padding")
     |> Enum.map(fn {slot, data} -> {slot, ATECC508A.DataZone.pad_to_slot_size(slot, data)} end)
+    |> IO.inspect(label: "post-padding")
   end
 
   @doc """
