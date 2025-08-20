@@ -307,11 +307,8 @@ defmodule NervesKey.Config do
         []
 
       [{name, bits} | format] ->
-        # IO.inspect(binary, label: "bin", as: :binary, base: :binary)
         rem = 8 - (offset + bits)
         <<_skip::size(rem), part::size(bits), _::size(offset)>> = binary
-        # IO.inspect({offset, bits, rem}, label: "slice")
-        # IO.inspect(part, label: "got", as: :binary, base: :binary)
         [
           {name, part, bits, offset + base_offset},
           format(binary, format, offset + bits, base_offset)
@@ -499,9 +496,7 @@ defmodule NervesKey.Config do
        ),
        do: true
 
-  defp slot_config_volatile(bin) do
-    IO.inspect(bin)
-
+  defp slot_config_volatile(_) do
     false
   end
 

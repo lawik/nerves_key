@@ -125,9 +125,7 @@ defmodule NervesKey.Data do
       {14, <<>>},
       {15, <<>>}
     ]
-    |> IO.inspect(label: "pre-padding")
     |> Enum.map(fn {slot, data} -> {slot, ATECC508A.DataZone.pad_to_slot_size(slot, data)} end)
-    |> IO.inspect(label: "post-padding")
   end
 
   @doc """
@@ -231,6 +229,4 @@ defmodule NervesKey.Data do
   @spec signer_pubkey_slot(NervesKey.certificate_pair()) :: ATECC508A.Request.slot()
   def signer_pubkey_slot(:primary), do: 11
   def signer_pubkey_slot(:aux), do: 14
-
-  def aes_key_slot(), do: 1
 end
