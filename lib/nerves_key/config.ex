@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2018 Frank Hunleth
 # SPDX-FileCopyrightText: 2019 Justin Schneck
 # SPDX-FileCopyrightText: 2019 Peter C. Marks
+# SPDX-FileCopyrightText: 2025 Lars Wikman
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -21,6 +22,11 @@ defmodule NervesKey.Config do
                  0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x2F, 0x0F, 0x2F, 0x0F, 0x2F,
                  0x0F, 0x2F, 0x0F, 0x0F, 0x0F, 0x0F>>
 
+  # The structure of key configs and slot configs which let's us print the current config on
+  # a device. Mostly useful during development of new configs. But an absolute pain to not
+  # have.
+  # Also provides the necessary offsets and lengths to be able to edit specific fields without
+  # touching the rest of the config.
   @key [
     [
       private: 1,
@@ -145,41 +151,10 @@ defmodule NervesKey.Config do
     {@key_config, @slot_config}
   end
 
-  def unpack_config(slots) do
-    IO.inspect(byte_size(@key_config), label: "key config, bytes")
-    IO.inspect(byte_size(@slot_config), label: "slot config, bytes")
-
-    key_config =
-      @key_config
-      |> twobyte()
-
-    slot_config =
-      @slot_config
-      |> twobyte()
-
-    Enum.zip(key_config, slot_config)
-    |> Enum.with_index()
-    |> Enum.each(fn {{key, slot}, index} ->
-      if is_nil(slots) || index in slots do
-        IO.puts("\n\n--- Slot #{index} -----------------------------")
-
-        IO.puts(
-          "slot: #{inspect(slot, as: :binary, base: :hex)} :: #{inspect(slot, as: :binary, base: :binary)}"
-        )
-
-        IO.puts(
-          "key: #{inspect(key, as: :binary, base: :hex)} :: #{inspect(key, as: :binary, base: :binary)}"
-        )
-
-        IO.puts("\n")
-
-        unpack_slot(slot)
-        unpack_key(key)
-      end
-    end)
-  end
-
-  def unpack_config(transport, slots) do
+  @doc """
+  Prints configuration of device slots.
+  """
+  def print_slots(transport, slots) do
     {:ok, %{slot_config: slot_config, key_config: key_config}} = Configuration.read(transport)
 
     key_config =
@@ -498,14 +473,12 @@ defmodule NervesKey.Config do
 
   def volatile_config_compatible?(transport) do
     with {:ok, %Configuration.Config608{} = info} <- Configuration.read(transport, :atecc608) do
-      IO.inspect(info)
-
       answer =
-        IO.inspect(info.lock_config == 0, label: "lock_config") and
-          IO.inspect(info.chip_mode == 0, label: "chip_mode") and
-          IO.inspect(slot_config_volatile(info.slot_config), label: "slot_config") and
-          IO.inspect(key_config_volatile(info.key_config), label: "key_config") and
-          IO.inspect(info.volatile_key_permission.enabled?, label: "volatile_key_permission")
+        info.lock_config == 0 and
+          info.chip_mode == 0 and
+          slot_config_volatile(info.slot_config) and
+          key_config_volatile(info.key_config) and
+          info.volatile_key_permission.enabled?
 
       {:ok, answer}
     end
@@ -547,10 +520,6 @@ defmodule NervesKey.Config do
        do: true
 
   defp key_config_volatile(_), do: false
-
-  defp bin(val) do
-    :io_lib.format("~8.02B", [val]) |> to_string() |> String.replace(" ", "0")
-  end
 
   defp b2(val) do
     :io_lib.format("~.02B", [val]) |> to_string()

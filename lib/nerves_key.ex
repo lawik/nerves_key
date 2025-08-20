@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: 2021 Alex McLain
 # SPDX-FileCopyrightText: 2022 Connor Rigby
 # SPDX-FileCopyrightText: 2022 Digit
+# SPDX-FileCopyrightText: 2025 Lars Wikman
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -371,11 +372,12 @@ defmodule NervesKey do
   end
 
   @doc """
-  Provision a NervesKey in one step.
+  Provision a NervesKey for the volatile key config in one step.
 
   See the README.md for how to use this. This function locks the
   ATECC508A down, so you'll want to be sure what you pass it is
-  correct.
+  correct. Ensure you have the activation key in safe storage, it
+  will be required to use the NervesKey.
 
   This function does it all. It requires the signer's private key so
   handle that with care. Alternatively, please consider sending a PR
@@ -398,6 +400,10 @@ defmodule NervesKey do
         <<_::128>> = encryption_key
       ) do
     check_time()
+
+    {:ok, config} = ATECC508A.Configuration.read(transport)
+    # Ensure the device supports volatile key config
+    true = ATECC508A.Configuration.supports_volatile?(config)
 
     :ok = volatile_configure(transport)
     otp_info = OTP.new(info.board_name, info.manufacturer_sn)
@@ -429,52 +435,10 @@ defmodule NervesKey do
     # Lock the slot that contains the private key to prevent calls to GenKey
     # from changing it. See datasheet for how GenKey doesn't check the zone
     # lock.
+    # Lock the slots containing the activation and encryption keys.
     :ok = ATECC508A.Request.lock_slot(transport, 0)
     :ok = ATECC508A.Request.lock_slot(transport, 1)
     :ok = ATECC508A.Request.lock_slot(transport, 2)
-  end
-
-  @doc """
-  Test a provision of a NervesKey.
-
-  See the README.md for how to use this. This function locks the
-  ATECC508A down, so you'll want to be sure what you pass it is
-  correct.
-
-  This function does it all. It requires the signer's private key so
-  handle that with care. Alternatively, please consider sending a PR
-  for supporting off-device signatures so that HSMs can be used.
-  """
-  @spec test_provision(
-          ATECC508A.Transport.t(),
-          ProvisioningInfo.t(),
-          X509.Certificate.t(),
-          X509.PrivateKey.t()
-        ) :: :ok
-  def test_provision(transport, info, signer_cert, signer_key) do
-    check_time()
-
-    # Configure does lock the config
-    # :ok = configure(transport)
-    otp_info = OTP.new(info.board_name, info.manufacturer_sn)
-    otp_data = OTP.to_raw(otp_info)
-    :ok = OTP.write(transport, otp_data)
-
-    {:ok, device_public_key} = Data.genkey(transport)
-    {:ok, device_sn} = Config.device_sn(transport)
-
-    device_cert =
-      ATECC508A.Certificate.new_device(
-        device_public_key,
-        device_sn,
-        info.manufacturer_sn,
-        signer_cert,
-        signer_key
-      )
-
-    slot_data = Data.slot_data(device_sn, device_cert, signer_cert)
-
-    :ok = Data.write_slots(transport, slot_data)
   end
 
   @doc """
