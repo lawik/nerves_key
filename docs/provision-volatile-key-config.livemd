@@ -1,4 +1,4 @@
-# Provision Authorized Configuration
+# Provision Volatile Key Configuration
 
 ```elixir
 Mix.install([:nerves_key, :atecc508a])
@@ -29,6 +29,7 @@ accepted_field = Kino.Input.checkbox("I understand the consequences")
 fields = [manufacturer_sn_field, board_name_field, cert_name_field, activation_field, encryption_field, accepted_field]
 Kino.Layout.grid(fields, columns: 3) |> Kino.render()
 
+# These keys are considered test keys and we share the private key intentionally
 cert_field = Kino.Input.textarea("Signer certificate", default: """
 -----BEGIN CERTIFICATE-----
 MIIBpzCCAU2gAwIBAgIQc3p50MJrn1hkMJ20b6c6cjAKBggqhkjOPQQDAjARMQ8w

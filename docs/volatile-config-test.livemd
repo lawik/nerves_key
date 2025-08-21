@@ -17,12 +17,12 @@ Mix.install([:nerves_key, :atecc508a])
 ## Signing a digest fails, the private key is locked
 
 ```elixir
-digest = :crypto.hash(:sha256, "foo")
+digest = ATECC508A.Host.digest("foo")
 # 0x0F is Execution Error and the appropriate failure mode
 {:ok, <<0x0F>>} = NervesKey.sign_digest(i2c, digest)
 ```
 
-## Generate a MAC should fail
+## Generating a MAC should fail
 
 ```elixir
 <<input::32-bytes>> = <<0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef::size(32*8)>>
@@ -42,7 +42,7 @@ ATECC508A.Request.auth_volatile_key(i2c, 1, padded_key)
 ## Signing a digest should work
 
 ```elixir
-digest = :crypto.hash(:sha256, "foo")
+digest = ATECC508A.Host.digest("foo")
 # 0x0F is Execution Error and the appropriate failure mode
 {:ok, <<_::64-bytes>>} = NervesKey.sign_digest(i2c, digest)
 ```

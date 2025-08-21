@@ -24,6 +24,9 @@ decisions to make working with the device easier. It has the following features:
    EEPROM slots
 6. Support auxillary device/signer certificate storage to support pre-production
    experimentation without needing to lock down certificates
+7. (bonus) Optionally lock down the hardware device with an activation key. More
+   complex but offers a method of storing encryption keys. See Volatile key
+   configuration later in this document.
 
 It cannot be stressed enough that the NervesKey library locks down the
 ATECC508A/608A during the provisioning process. This is a feature and is
@@ -479,6 +482,13 @@ up to tamper protection in various ways.
 The ATECC608 has *severe limitations* in protecting symmetric encryption keys. The AES feature
 passes decrypted information in cleartext over I2C. This configuration is an option for cases
 where you want that higher level of security and are willing to trade off on convenience.
+
+**Important:** If you cannot secure the physical aspect with some kind of tamper mechanism,
+this config adds complexity but really only provides obscurity. With proper tamper protection,
+this should provide reasonable protection for secrets like disk encryption keys. If your board
+has other secure storage via ARM TrustZone or similar you don't need this mechanism. With the
+appropriate physical and electronic protections in place this can add key storage to a
+Raspberry Pi which lacks protected storage.
 
 Providing authorization is up to the application but could be done with a PIN-code, password,
 USB key or something else.
