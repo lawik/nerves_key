@@ -502,16 +502,23 @@ defmodule NervesKey.Config do
     end
   end
 
+  @doc """
+  Check whether an ATECC608's configuration is the volatile one this library
+  provisions. Takes a transport, or a `Config608` already read from one.
+  """
+  @spec volatile_config_compatible?(ATECC508A.Transport.t() | Configuration.Config608.t()) ::
+          {:error, atom()} | {:ok, boolean()} | boolean()
+  def volatile_config_compatible?(%Configuration.Config608{} = info) do
+    info.lock_config == 0 and
+      info.chip_mode == 0 and
+      slot_config_volatile(info.slot_config) and
+      key_config_volatile(info.key_config) and
+      info.volatile_key_permission.enabled?
+  end
+
   def volatile_config_compatible?(transport) do
     with {:ok, %Configuration.Config608{} = info} <- Configuration.read(transport, :atecc608) do
-      answer =
-        info.lock_config == 0 and
-          info.chip_mode == 0 and
-          slot_config_volatile(info.slot_config) and
-          key_config_volatile(info.key_config) and
-          info.volatile_key_permission.enabled?
-
-      {:ok, answer}
+      {:ok, volatile_config_compatible?(info)}
     end
   end
 
